@@ -43,14 +43,14 @@ impl From<Handle> for usize {
 /// 
 /// A user can use custom type for the key type by implementing this trait.
 /// 
-/// This trait is implicitely implemented already for all types that 
+/// This trait is implicitly implemented already for all types that
 /// are `Copy`, `PartialOrd` and `Ord`.
 pub trait Key: Copy + PartialOrd + Ord {}
 impl<T> Key for T where T: Copy + PartialOrd + Ord {}
 
 /// An entry within an addressable pairing heap.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Entry<T, K> where K: Key {
+pub struct Entry<T, K> where K: Key {
 	key : K,
 	elem: T
 }
@@ -64,6 +64,16 @@ impl<T, K> Entry<T, K>
 			key : key,
 			elem: elem
 		}
+	}
+
+	/// Returns a reference to the key of this entry.
+	pub fn key(&self) -> &K {
+		&self.key
+	}
+
+	/// Returns a reference to the element of this entry.
+	pub fn elem(&self) -> &T {
+		&self.elem
 	}
 }
 
@@ -184,6 +194,16 @@ impl<T, K> PairingHeap<T, K>
 			roots: Vec::new(),
 			data : Stash::default()
 		}
+	}
+
+	/// Clears the `PairingHeap` by clearing the underlying data structures.
+	/// As long the stdlib does not deallocate a vectors memory on clear,
+	/// this allows for efficient reuse of the roots vector.
+	/// No idea about the stash though.
+	pub fn clear(&mut self) {
+		self.min = Handle::undef();
+		self.roots.clear();
+		self.data.clear();
 	}
 
 	/// Returns the number of elements stored in this `PairingHeap`.
@@ -326,39 +346,39 @@ impl<T, K> PairingHeap<T, K>
 
 	/// Returns a reference to the element associated with the given handle.
 	#[inline]
-	pub fn get(&self, handle: Handle) -> Option<&T> {
+	pub fn get(&self, handle: Handle) -> Option<&Entry<T, K>> {
 		self.data
 			.get(handle)
-			.and_then(|node| Some(&node.entry.elem))
+			.and_then(|node| Some(&node.entry))
 	}
 
 	/// Returns a mutable reference to the element associated with the given handle.
 	#[inline]
-	pub fn get_mut(&mut self, handle: Handle) -> Option<&mut T> {
+	pub fn get_mut(&mut self, handle: Handle) -> Option<&mut Entry<T, K>> {
 		self.data
 			.get_mut(handle)
-			.and_then(|node| Some(&mut node.entry.elem))
+			.and_then(|node| Some(&mut node.entry))
 	}
 
 	/// Returns a reference to the element associated with the given handle.
 	/// 
 	/// Does not perform bounds checking so use it carefully!
 	#[inline]
-	pub unsafe fn get_unchecked(&self, handle: Handle) -> &T {
-		&self.node(handle).entry.elem
+	pub unsafe fn get_unchecked(&self, handle: Handle) -> &Entry<T, K> {
+		&self.node(handle).entry
 	}
 
 	/// Returns a mutable reference to the element associated with the given handle.
 	/// 
 	/// Does not perform bounds checking so use it carefully!
 	#[inline]
-	pub unsafe fn get_unchecked_mut(&mut self, handle: Handle) -> &mut T {
-		&mut self.node_mut(handle).entry.elem
+	pub unsafe fn get_unchecked_mut(&mut self, handle: Handle) -> &mut Entry<T, K> {
+		&mut self.node_mut(handle).entry
 	}
 
 	/// Returns a reference to the current minimum element if not empty.
 	#[inline]
-	pub fn peek(&self) -> Option<&T> {
+	pub fn peek(&self) -> Option<&Entry<T, K>> {
 		self.get(self.min)
 	}
 
@@ -366,13 +386,13 @@ impl<T, K> PairingHeap<T, K>
 	/// 
 	/// Does not perform bounds checking so use it carefully!
 	#[inline]
-	pub unsafe fn peek_unchecked(&self) -> &T {
+	pub unsafe fn peek_unchecked(&self) -> &Entry<T, K> {
 		self.get_unchecked(self.min)
 	}
 
 	/// Returns a mutable reference to the current minimum element if not empty.
 	#[inline]
-	pub fn peek_mut(&mut self) -> Option<&mut T> {
+	pub fn peek_mut(&mut self) -> Option<&mut Entry<T, K>> {
 		let min = self.min;
 		self.get_mut(min)
 	}
@@ -380,14 +400,14 @@ impl<T, K> PairingHeap<T, K>
 	/// Returns a reference to the current minimum element without bounds checking.
 	/// So use it very carefully!
 	#[inline]
-	pub unsafe fn peek_unchecked_mut(&mut self) -> &mut T {
+	pub unsafe fn peek_unchecked_mut(&mut self) -> &mut Entry<T, K> {
 		let min = self.min;
 		self.get_unchecked_mut(min)
 	}
 
 	/// Removes the element associated with the minimum key within this `PairingHeap` and returns it.
 	#[inline]
-	pub fn pop(&mut self) -> Option<T> {
+	pub fn pop(&mut self) -> Option<Entry<T, K>> {
 		match self.is_empty() {
 			true => None,
 			_    => unsafe{ Some(self.pop_unchecked()) }
@@ -398,7 +418,7 @@ impl<T, K> PairingHeap<T, K>
 	/// checking for emptiness and returns it.
 	/// 
 	/// So use this method carefully!
-	pub unsafe fn pop_unchecked(&mut self) -> T {
+	pub unsafe fn pop_unchecked(&mut self) -> Entry<T, K> {
 		let min = self.min;
 		match self.node(min).pos {
 			Position::Child(..) => ::unreachable::unreachable(),
@@ -409,7 +429,7 @@ impl<T, K> PairingHeap<T, K>
 					self.insert_root(child);
 				}
 				self.pairwise_union();
-				self.data.take_unchecked(min).entry.elem
+				self.data.take_unchecked(min).entry
 			}
 		}
 	}
@@ -493,7 +513,7 @@ pub struct DrainMin<T, K: Key> {
 }
 
 impl<T, K: Key> Iterator for DrainMin<T, K> {
-	type Item = T;
+	type Item = Entry<T, K>;
 
 	#[inline]
 	fn next(&mut self) -> Option<Self::Item> {
@@ -518,16 +538,16 @@ mod tests {
 		ph.push(7,   3);
 		ph.push(8,   4);
 		ph.push(9,   5);
-		assert_eq!(Some(2), ph.pop());
-		assert_eq!(Some(4), ph.pop());
-		assert_eq!(Some(5), ph.pop());
-		assert_eq!(Some(6), ph.pop());
-		assert_eq!(Some(7), ph.pop());
-		assert_eq!(Some(8), ph.pop());
-		assert_eq!(Some(9), ph.pop());
-		assert_eq!(Some(0), ph.pop());
-		assert_eq!(Some(1), ph.pop());
-		assert_eq!(Some(3), ph.pop());
+		assert_eq!(Some(Entry::new(-42, 2)), ph.pop());
+		assert_eq!(Some(Entry::new(-1, 4)), ph.pop());
+		assert_eq!(Some(Entry::new(1, 5)), ph.pop());
+		assert_eq!(Some(Entry::new(2, 6)), ph.pop());
+		assert_eq!(Some(Entry::new(3, 7)), ph.pop());
+		assert_eq!(Some(Entry::new(4, 8)), ph.pop());
+		assert_eq!(Some(Entry::new(5, 9)), ph.pop());
+		assert_eq!(Some(Entry::new(6, 0)), ph.pop());
+		assert_eq!(Some(Entry::new(10, 1)), ph.pop());
+		assert_eq!(Some(Entry::new(1337, 3)), ph.pop());
 		assert_eq!(None   , ph.pop());
 	}
 
@@ -540,19 +560,19 @@ mod tests {
 		let d = ph.push(3, 150);
 		let e = ph.push(4, 200);
 		let f = ph.push(5, 250);
-		assert_eq!(Some(&0), ph.peek());
+		assert_eq!(Some(&Entry::new(0, 0)), ph.peek());
 		assert_eq!(Ok(()), ph.decrease_key(f, -50));
-		assert_eq!(Some(&5), ph.peek());
+		assert_eq!(Some(&Entry::new(-50, 5)), ph.peek());
 		assert_eq!(Ok(()), ph.decrease_key(e, -100));
-		assert_eq!(Some(&4), ph.peek());
+		assert_eq!(Some(&Entry::new(-100, 4)), ph.peek());
 		assert_eq!(Ok(()), ph.decrease_key(d, -99));
-		assert_eq!(Some(&4), ph.peek());
+		assert_eq!(Some(&Entry::new(-100, 4)), ph.peek());
 		assert_eq!(Err(Error::DecreaseKeyOutOfOrder), ph.decrease_key(c, 1000));
-		assert_eq!(Some(&4), ph.peek());
+		assert_eq!(Some(&Entry::new(-100, 4)), ph.peek());
 		assert_eq!(Ok(()), ph.decrease_key(b, -1000));
-		assert_eq!(Some(&1), ph.peek());
+		assert_eq!(Some(&Entry::new(-1000, 1)), ph.peek());
 		assert_eq!(Err(Error::DecreaseKeyOutOfOrder), ph.decrease_key(a, 100));
-		assert_eq!(Some(&1), ph.peek());
+		assert_eq!(Some(&Entry::new(-1000, 1)), ph.peek());
 	}
 
 	#[test]
@@ -584,61 +604,30 @@ mod tests {
 		ph
 	}
 
-	// fn setup_vec() -> Vec<(char, i64)> {
-	// 	vec![
-	// 		('a',  0), ('A', 26), ('.', 52),
-	// 		('b',  1), ('B', 27), (',', 53),
-	// 		('c',  2), ('C', 28), (';', 54),
-	// 		('d',  3), ('D', 29), ('!', 55),
-	// 		('e',  4), ('E', 30), ('&', 56),
-	// 		('f',  5), ('F', 31), ('|', 57),
-	// 		('g',  6), ('G', 32), ('(', 58),
-	// 		('h',  7), ('H', 33), (')', 59),
-	// 		('i',  8), ('I', 34), ('[', 60),
-	// 		('j',  9), ('J', 35), (']', 61),
-	// 		('k', 10), ('K', 36), ('{', 62),
-	// 		('l', 11), ('L', 37), ('}', 63),
-	// 		('m', 12), ('M', 38), ('=', 64),
-	// 		('n', 13), ('N', 39), ('?', 65),
-	// 		('o', 14), ('O', 40), ('+', 66),
-	// 		('p', 15), ('P', 41), ('-', 67),
-	// 		('q', 16), ('Q', 42), ('*', 68),
-	// 		('r', 17), ('R', 43), ('/', 69),
-	// 		('s', 18), ('S', 44), ('<', 70),
-	// 		('t', 19), ('T', 45), ('>', 71),
-	// 		('u', 20), ('U', 46), ('=', 72),
-	// 		('v', 21), ('V', 47), ('#', 73),
-	// 		('w', 22), ('W', 48), ('~', 74),
-	// 		('x', 23), ('X', 49), ('?', 75),
-	// 		('y', 24), ('Y', 50), (':', 76),
-	// 		('z', 25), ('Z', 51), ('^', 77)
-	// 	]
-	// }
-
 	#[test]
 	fn drain_min() {
 		let ph = setup();
 		let mut drain = ph.drain_min();
 
-		assert_eq!(drain.next(), Some('m'));
-		assert_eq!(drain.next(), Some('j'));
-		assert_eq!(drain.next(), Some('k'));
-		assert_eq!(drain.next(), Some('d'));
-		assert_eq!(drain.next(), Some('s'));
-		assert_eq!(drain.next(), Some('q'));
-		assert_eq!(drain.next(), Some('o'));
-		assert_eq!(drain.next(), Some('n'));
+		assert_eq!(drain.next(), Some(Entry::new(-123, 'm')));
+		assert_eq!(drain.next(), Some(Entry::new(-100, 'j')));
+		assert_eq!(drain.next(), Some(Entry::new(-77, 'k')));
+		assert_eq!(drain.next(), Some(Entry::new(-25, 'd')));
+		assert_eq!(drain.next(), Some(Entry::new(-5, 's')));
+		assert_eq!(drain.next(), Some(Entry::new(-3, 'q')));
+		assert_eq!(drain.next(), Some(Entry::new(-1, 'o')));
+		assert_eq!(drain.next(), Some(Entry::new(0, 'n')));
 
-		assert_eq!(drain.next(), Some('p'));
-		assert_eq!(drain.next(), Some('r'));
-		assert_eq!(drain.next(), Some('i'));
-		assert_eq!(drain.next(), Some('f'));
-		assert_eq!(drain.next(), Some('g'));
-		assert_eq!(drain.next(), Some('b'));
-		assert_eq!(drain.next(), Some('a'));
-		assert_eq!(drain.next(), Some('l'));
-		assert_eq!(drain.next(), Some('c'));
-		assert_eq!(drain.next(), Some('e'));
+		assert_eq!(drain.next(), Some(Entry::new(2, 'p')));
+		assert_eq!(drain.next(), Some(Entry::new(4, 'r')));
+		assert_eq!(drain.next(), Some(Entry::new(41, 'i')));
+		assert_eq!(drain.next(), Some(Entry::new(42, 'f')));
+		assert_eq!(drain.next(), Some(Entry::new(43, 'g')));
+		assert_eq!(drain.next(), Some(Entry::new(50, 'b')));
+		assert_eq!(drain.next(), Some(Entry::new(100, 'a')));
+		assert_eq!(drain.next(), Some(Entry::new(123, 'l')));
+		assert_eq!(drain.next(), Some(Entry::new(150, 'c')));
+		assert_eq!(drain.next(), Some(Entry::new(999, 'e')));
 
 		assert_eq!(drain.next(), None);
 	}
